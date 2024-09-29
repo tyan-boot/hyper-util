@@ -76,8 +76,15 @@ struct Config {
     reuse_address: bool,
     send_buffer_size: Option<usize>,
     recv_buffer_size: Option<usize>,
-    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+    #[cfg(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "macos"
+    ))]
     interface: Option<String>,
+    #[cfg(target_os = "windows")]
+    interface: Option<u32>,
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     tcp_user_timeout: Option<Duration>,
 }
@@ -182,7 +189,13 @@ impl<R> HttpConnector<R> {
                 reuse_address: false,
                 send_buffer_size: None,
                 recv_buffer_size: None,
-                #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+                #[cfg(any(
+                    target_os = "android",
+                    target_os = "fuchsia",
+                    target_os = "linux",
+                    target_os = "macos",
+                    target_os = "windows"
+                ))]
                 interface: None,
                 #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
                 tcp_user_timeout: None,
@@ -321,7 +334,13 @@ impl<R> HttpConnector<R> {
     /// This function is only available on Android、Fuchsia and Linux.
     ///
     /// [VRF]: https://www.kernel.org/doc/Documentation/networking/vrf.txt
-    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+    #[cfg(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows"
+    ))]
     #[inline]
     pub fn set_interface<S: Into<String>>(&mut self, interface: S) -> &mut Self {
         self.config_mut().interface = Some(interface.into());
@@ -731,12 +750,50 @@ fn connect(
         }
     }
 
-    #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
+    #[cfg(any(
+        target_os = "android",
+        target_os = "fuchsia",
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows"
+    ))]
     // That this only works for some socket types, particularly AF_INET sockets.
     if let Some(interface) = &config.interface {
+        #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
         socket
             .bind_device(Some(interface.as_bytes()))
             .map_err(ConnectError::m("tcp bind interface error"))?;
+
+        #[cfg(target_os = "macos")]
+        {
+            use std::ffi::CString;
+            let interface_name = CString::new(interface)
+                .map_err(|e| ConnectError::new("invalid interface name", e))?;
+            let iff_index = unsafe { libc::if_nametoindex(interface_name.as_ptr()) };
+
+            if iff_index != 0 {
+                socket
+                    .bind_device_by_index_v4(Some(iff_index.try_into().unwrap()))
+                    .map_err(ConnectError::m("tcp bind interface error"))?;
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::{ffi::OsStrExt, io::AsRawSocket};
+            use windows_sys::Win32::Networking::WinSock::{setsockopt, IPPROTO_IP, IP_UNICAST_IF};
+            let fd = socket.as_raw_socket();
+            unsafe {
+                let index_slice = interface.to_be_bytes();
+                setsockopt(
+                    fd as usize,
+                    IPPROTO_IP,
+                    IP_UNICAST_IF,
+                    index_slice.as_ptr(),
+                    4,
+                );
+            }
+        }
     }
 
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
