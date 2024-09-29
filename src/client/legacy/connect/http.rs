@@ -382,12 +382,30 @@ impl<R> HttpConnector<R> {
         target_os = "android",
         target_os = "fuchsia",
         target_os = "linux",
-        target_os = "macos",
-        target_os = "windows"
+        target_os = "macos"
     ))]
     #[inline]
     pub fn set_interface<S: Into<String>>(&mut self, interface: S) -> &mut Self {
         self.config_mut().interface = Some(interface.into());
+        self
+    }
+
+    /// Sets the value for the `SO_BINDTODEVICE` option on this socket.
+    ///
+    /// If a socket is bound to an interface, only packets received from that particular
+    /// interface are processed by the socket. Note that this only works for some socket
+    /// types, particularly AF_INET sockets.
+    ///
+    /// On Linux it can be used to specify a [VRF], but the binary needs
+    /// to either have `CAP_NET_RAW` or to be run as root.
+    ///
+    /// This function is only available on Android、Fuchsia and Linux.
+    ///
+    /// [VRF]: https://www.kernel.org/doc/Documentation/networking/vrf.txt
+    #[cfg(target_os = "windows")]
+    #[inline]
+    pub fn set_interface(&mut self, interface: u32) -> &mut Self {
+        self.config_mut().interface = Some(interface);
         self
     }
 
