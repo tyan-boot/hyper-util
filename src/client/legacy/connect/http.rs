@@ -774,7 +774,7 @@ fn connect(
         #[cfg(target_os = "macos")]
         {
             use std::ffi::CString;
-            let interface_name = CString::new(interface)
+            let interface_name = CString::new(interface.to_owned())
                 .map_err(|e| ConnectError::new("invalid interface name", e))?;
             let iff_index = unsafe { libc::if_nametoindex(interface_name.as_ptr()) };
 
