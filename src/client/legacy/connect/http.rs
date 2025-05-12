@@ -88,6 +88,8 @@ struct Config {
         target_os = "watchos",
     ))]
     interface: Option<std::ffi::CString>,
+    #[cfg(target_os = "windows")]
+    interface: Option<u32>,
     #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
     tcp_user_timeout: Option<Duration>,
 }
@@ -247,6 +249,7 @@ impl<R> HttpConnector<R> {
                     target_os = "tvos",
                     target_os = "visionos",
                     target_os = "watchos",
+                    target_os = "windows"
                 ))]
                 interface: None,
                 #[cfg(any(target_os = "android", target_os = "fuchsia", target_os = "linux"))]
@@ -423,6 +426,13 @@ impl<R> HttpConnector<R> {
                 .expect("interface name should not have nulls in it");
             self.config_mut().interface = Some(interface);
         }
+        self
+    }
+
+    #[cfg(target_os = "windows")]
+    #[inline]
+    pub fn set_interface(&mut self, interface: u32) -> &mut Self {
+        self.config_mut().interface = Some(interface);
         self
     }
 
@@ -893,6 +903,23 @@ fn connect(
                 SocketAddr::V6(_) => socket.bind_device_by_index_v6(Some(idx)),
             }
             .map_err(ConnectError::m("tcp bind interface error"))?;
+        }
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::{ffi::OsStrExt, io::AsRawSocket};
+            use windows_sys::Win32::Networking::WinSock::{setsockopt, IPPROTO_IP, IP_UNICAST_IF};
+            let fd = socket.as_raw_socket();
+            unsafe {
+                let index_slice = interface.to_be_bytes();
+                setsockopt(
+                    fd as usize,
+                    IPPROTO_IP,
+                    IP_UNICAST_IF,
+                    index_slice.as_ptr(),
+                    4,
+                );
+            }
         }
     }
 
